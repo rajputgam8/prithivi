@@ -1,0 +1,51 @@
+# PRITHIVI runtime dependencies
+#
+# Phase 1 is the only phase implemented so far. Later phases append here
+# (see docs/ROADMAP.md "Dependencies" table for the per-phase mapping).
+#
+# Install:  python -m pip install -r requirements.txt
+
+# --- core runtime (Phase 1) -------------------------------------------------
+# Note: no pydantic. Settings and tool argument models are stdlib dataclasses
+# (see prithivi/core/config.py and prithivi/core/schema.py). Listing pydantic
+# here installed ~30 MB of unused code onto a device with roughly 750 MB free.
+httpx>=0.27,<1
+rich>=13.9,<15
+
+# --- later phases (commented until that phase begins) -----------------------
+# Phase 2 voice
+# faster-whisper>=1.0
+# openwakeword>=0.6
+# piper-tts>=1.2
+# webrtcvad>=2.0
+#
+# Phase 3 computer control
+# playwright>=1.47
+# mss>=9
+# pynput>=1.7
+# psutil>=6
+# platformdirs>=4
+#
+# Phase 4/5 vision
+# opencv-python>=4.10
+# mediapipe>=0.10
+#
+# Phase 6 web intelligence
+# trafilatura>=1.12
+# beautifulsoup4>=4.12
+#
+# Phase 7 RAG + memory
+# aiosqlite>=0.20
+# sqlite-vec>=0.1
+# fastembed>=0.4
+# pypdf>=5.0
+# markdown>=3.7
+# python-docx>=1.1
+#
+# Phase 9 automation
+# apscheduler>=3.10
+#
+# Phase 10 UI + API
+# fastapi>=0.115
+# uvicorn[standard]>=0.32
+# websockets>=13

@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# Runtime data
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Local models / ML artefacts
+models/
+*.gguf
+*.onnx
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Frontend
+node_modules/
+interface/ui/dist/
+interface/web/static/assets/
