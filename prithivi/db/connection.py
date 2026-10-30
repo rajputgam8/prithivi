@@ -30,7 +30,7 @@ import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 __all__ = ["MIGRATIONS_DIR", "Database", "DatabaseError"]
 
@@ -220,7 +220,7 @@ class Database:
         if self._closed:
             raise DatabaseError("database is closed")
 
-    def __enter__(self) -> Database:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:

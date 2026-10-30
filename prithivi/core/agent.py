@@ -29,7 +29,7 @@ from typing import Any
 from ..core.events import EventBus
 from ..core.narrator import Narration, Narrator, Provenance, ProvenanceKind
 from ..core.state import AgentState, Modality, SessionState, TurnSource
-from ..llm.prompts import SYSTEM_PROMPT
+from ..llm.prompts import SYSTEM_PROMPT, wrap_untrusted
 from ..llm.provider import Completion, DeltaCallback, LLMError, LLMProvider, Message
 from ..security.audit import AuditLog
 from ..security.confirmation import ConfirmationBroker
@@ -107,6 +107,9 @@ class Agent:
         narrator: Narrator | None = None,
         router: Router | None = None,
         system_prompt: str = SYSTEM_PROMPT,
+        memory: Any = None,
+        knowledge: Any = None,
+        sessions: Any = None,
     ) -> None:
         self.provider = provider
         self.registry = registry
@@ -121,6 +124,11 @@ class Agent:
         # provider (the LLM path stays the responsibility of ``run``).
         self.router = router or Router(provider=None, app_names=registry.names)
         self.system_prompt = system_prompt
+        # Phase 7 services. All optional: a test or an offline run can assemble a
+        # registry with none of them, and the agent still works exactly as before.
+        self.memory = memory
+        self.knowledge = knowledge
+        self.sessions = sessions
         # One scratch dict for the whole agent, shared by every ToolContext this
         # agent builds. Tools cache their expensive, reusable machinery here — the
         # platform adapter (which probes with several subprocesses) and the HTTP
@@ -144,8 +152,110 @@ class Agent:
         return self._scratch
 
     def reset(self) -> None:
+        if self.sessions is not None:
+            try:
+                self.sessions.end_session(self._session.session_id)
+            except Exception:  # a lost session row must not block a reset
+                log.exception("could not end session %s", self._session.session_id)
         self._session = SessionState(session_id=f"s-{uuid.uuid4().hex[:10]}")
         self.confirmations.clear()
+
+    # -- phase 7: context hydration -----------------------------------
+    def _build_context(self, utterance: str) -> tuple[list[str], list[Provenance]]:
+        """Recall the user's memory and documents for this turn.
+
+        Memory is bounded: the profile block plus at most a handful of recalled
+        items. Knowledge retrieval only runs when documents exist, and its output
+        is fenced as untrusted, because a document is not the user speaking.
+        """
+        blocks: list[str] = []
+        provenance: list[Provenance] = []
+
+        memory = self.memory
+        if memory is not None and getattr(memory, "enabled", False):
+            try:
+                from ..memory.user_profile import UserProfile
+
+                profile = UserProfile(memory).as_prompt()
+                if profile:
+                    blocks.append(profile)
+                recalled = memory.recall(utterance, limit=int(getattr(self.settings, "memory_recall_limit", 5) or 5))
+            except Exception:  # context is an enhancement, never a crash
+                log.exception("memory context failed")
+                recalled = []
+            if recalled:
+                lines = ["Relevant things the user told me earlier:"]
+                for item in recalled:
+                    lines.append(f"- {item.record.text} (key: {item.record.key})")
+                blocks.append("\n".join(lines))
+                provenance.append(
+                    Provenance(ProvenanceKind.LOCAL_MEMORY, source_id=recalled[0].record.key)
+                )
+
+        knowledge = self.knowledge
+        if knowledge is not None:
+            try:
+                results = knowledge.search(
+                    utterance,
+                    top_k=int(getattr(self.settings, "retrieval_top_k", 8) or 8),
+                )
+            except Exception:  # a broken index must not block chat
+                log.exception("knowledge retrieval failed")
+                results = []
+            if results:
+                from ..rag.retrieval import format_context
+
+                context = format_context(results)
+                context += (
+                    "\n\nWhen you use the retrieved context above, cite each fact with its "
+                    "bracketed source marker, for example [1] or [2]. If the context does "
+                    "not contain the answer, say so instead of guessing."
+                )
+                blocks.append(wrap_untrusted(context, source="knowledge base"))
+                provenance.append(
+                    Provenance(ProvenanceKind.RETRIEVED_CONTEXT, source_id="knowledge_base")
+                )
+
+        return blocks, provenance
+
+    def _ensure_session_row(self, modality: Modality) -> None:
+        if self.sessions is None:
+            return
+        session_id = self._session.session_id
+        try:
+            if self.sessions.get_session(session_id) is None:
+                self.sessions.create_session(
+                    session_id=session_id,
+                    title=None,
+                    modality=modality.value,
+                    metadata={"source": "agent"},
+                )
+        except Exception:  # persistence must never fail a turn
+            log.exception("could not create session %s", session_id)
+
+    def _persist_turn(self, utterance: str, result: TurnResult, modality: Modality) -> None:
+        if self.sessions is None:
+            return
+        self._ensure_session_row(modality)
+        session_id = self._session.session_id
+        try:
+            self.sessions.append_message(
+                session_id=session_id,
+                role="user",
+                content=utterance,
+                modality=modality.value,
+            )
+            self.sessions.append_message(
+                session_id=session_id,
+                role="assistant",
+                content=result.text,
+                modality=modality.value,
+                provenance=[p.chip() for p in result.narration.provenance],
+                latency_ms=result.elapsed_ms,
+                tokens_out=None,
+            )
+        except Exception:
+            log.exception("could not persist turn for session %s", session_id)
 
     # -- the turn ------------------------------------------------------
     async def run(
@@ -177,8 +287,11 @@ class Agent:
         self._session = self._session.evolve(turn_count=self._session.turn_count + 1, modality=modality)
         self._set_state(AgentState.THINKING, source)
 
-        messages: list[Message] = [Message(role="system", content=self.system_prompt)]
-        for block in context_blocks:
+        hydrated_blocks, provenance = self._build_context(utterance)
+        system_prompt = self.system_prompt
+        blocks = [*hydrated_blocks, *context_blocks]
+        messages: list[Message] = [Message(role="system", content=system_prompt)]
+        for block in blocks:
             messages.append(Message(role="user", content=block))
         for role, content in history:
             messages.append(Message(role="user" if role == "user" else "assistant", content=content))
@@ -186,7 +299,6 @@ class Agent:
 
         tool_results: list[tuple[str, ToolResult]] = []
         tool_names: list[str] = []
-        provenance: list[Provenance] = []
         iterations = 0
         final_text = ""
         blocked = False
@@ -283,6 +395,7 @@ class Agent:
         )
         self._session.record_turn("user", utterance)
         self._session.record_turn("assistant", narration.text)
+        self._persist_turn(utterance, result, modality)
         self._audit("turn.end", "error" if error else "success", detail=result.to_dict() | {"trace": trace_id})
         return result
 
@@ -370,6 +483,7 @@ class Agent:
         )
         self._session.record_turn("user", utterance)
         self._session.record_turn("assistant", narration.text)
+        self._persist_turn(utterance, turn, self._session.modality)
         self._audit("turn.end", "success" if result.success else "error", detail=turn.to_dict() | {"trace": trace_id})
         return turn
 
@@ -455,6 +569,7 @@ class Agent:
             settings=self.settings, audit=self.audit, bus=self.bus,
             confirmation=self.confirmations, session_id=self._session.session_id,
             source=source.value, scratch=self._scratch,
+            memory=self.memory, knowledge=self.knowledge,
         )
         result = await self.registry.execute(name, args, decision, ctx, source=source)
         self.bus.publish("tool.result", {"tool": name, "result": result.to_dict()}, source=source.value)

@@ -158,6 +158,15 @@ class ConfirmationBroker:
         self.default_timeout_s = default_timeout_s
         self._pending: dict[str, ConfirmationRequest] = {}
 
+    def set_handler(self, handler: ConfirmHandler | None) -> None:
+        """Attach the interface that asks the user.
+
+        The web server and the voice loop both construct the broker before their
+        own UI exists, so the handler is swappable at startup. Swapping it never
+        grants an approval: an absent handler still declines.
+        """
+        self._handler = handler
+
     # -- lifecycle -----------------------------------------------------
     def _ttl_for(self, level: int) -> int:
         """SECURITY.md S3 timeouts: L2 60 s, L3 120 s, L4 180 s."""

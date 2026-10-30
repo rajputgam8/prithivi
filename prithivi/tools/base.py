@@ -235,6 +235,10 @@ class ToolContext:
     session_id: str = "default"
     source: str = "agent"
     scratch: dict[str, Any] = field(default_factory=dict)
+    memory: Any = None
+    """Long-term memory service (:class:`prithivi.memory.MemoryStore`), when enabled."""
+    knowledge: Any = None
+    """The user's document knowledge base (:class:`prithivi.rag.KnowledgeBase`)."""
 
     def progress(self, summary: str) -> None:
         """Emit a ``tool.activity`` event for the UI."""
@@ -285,8 +289,13 @@ class ToolSpec(Generic[TIn]):
             raise ValueError(f"{self.name}: permission_level must be 0..4")
         if not self.description.strip():
             raise ValueError(f"{self.name}: description is required (the model reads it)")
-        if not issubclass(self.input_model, Model):
-            raise ValueError(f"{self.name}: input_model must be a prithivi.core.schema.Model subclass")
+        try:
+            if not issubclass(self.input_model, Model):
+                raise ValueError(f"{self.name}: input_model must be a prithivi.core.schema.Model subclass")
+        except TypeError as exc:
+            if "issubclass()" in str(exc):
+                raise ValueError(f"{self.name}: input_model must be a prithivi.core.schema.Model subclass") from exc
+            raise
 
     def schema(self) -> dict[str, Any]:
         """OpenAI-style function schema."""

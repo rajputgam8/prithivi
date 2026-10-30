@@ -21,7 +21,8 @@ from typing import Literal
 __all__ = ["IntentDecision", "RouteOutcome", "Router"]
 
 IntentKind = Literal[
-    "open_app", "open_url", "calculate", "get_time", "chat", "unknown",
+    "open_app", "open_url", "calculate", "get_time",
+    "remember_memory", "forget_memory", "chat", "unknown",
 ]
 
 
@@ -59,6 +60,18 @@ _OPEN_RE = re.compile(rf"^{_OPEN_VERBS}\s+(?P<target>.+?)\s*$", re.IGNORECASE)
 
 # (compiled pattern, intent kind, tool name, argument extractor, human reason)
 _RULES: tuple[tuple[re.Pattern[str], IntentKind, str | None, object, str], ...] = (
+    (
+        # Explicit "remember X" is a memory write, not a conversation. The model
+        # never has to be involved, so the text cannot be reworded or dropped.
+        re.compile(r"^(?:please\s+)?remember(?:\s+that)?\s+(?P<text>\S.*)$", re.IGNORECASE),
+        "remember_memory", "remember_memory", lambda m: {"text": m.group("text").strip()},
+        "explicit request to remember something",
+    ),
+    (
+        re.compile(r"^(?:please\s+)?forget(?:\s+about|\s+that)?\s+(?P<key>\S.*)$", re.IGNORECASE),
+        "forget_memory", "forget_memory", lambda m: {"key": m.group("key").strip()},
+        "explicit request to forget a saved memory",
+    ),
     (
         re.compile(
             r"^(?:what(?:'s| is| was| are)?\s+)?(?:the\s+)?(?:current\s+)?"

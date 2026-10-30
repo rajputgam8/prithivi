@@ -26,7 +26,7 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from .secrets import redactor
 
@@ -218,7 +218,7 @@ class AuditLog:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> AuditLog:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:

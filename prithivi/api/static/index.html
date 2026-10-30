@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRITHIVI | Neural Interface</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <canvas id="bg-canvas"></canvas>
+  
+  <div id="auth" class="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="logo-orb"></div>
+        <h1>PRITHIVI</h1>
+      </div>
+      <p class="auth-subtitle">Neural Intelligence Interface</p>
+      <form id="auth-form">
+        <div class="input-group">
+          <input id="token-input" type="password" placeholder="Enter Access Token" autocomplete="off" required>
+          <div class="input-border"></div>
+        </div>
+        <button type="submit" class="auth-btn">
+          <span>Initialize Connection</span>
+          <div class="btn-glow"></div>
+        </button>
+      </form>
+      <p id="auth-error" class="auth-error"></p>
+    </div>
+  </div>
+
+  <div id="app" class="app-container" hidden>
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo-mini">
+          <div class="logo-orb-mini"></div>
+          <span>PRITHIVI</span>
+        </div>
+        <div class="status-indicator">
+          <div class="status-dot"></div>
+          <span id="conn-label">Connected</span>
+        </div>
+      </div>
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="chat">
+          <span class="tab-icon">💬</span>
+          <span>Chat</span>
+        </button>
+        <button class="nav-tab" data-tab="memory">
+          <span class="tab-icon">🧠</span>
+          <span>Memory</span>
+        </button>
+        <button class="nav-tab" data-tab="knowledge">
+          <span class="tab-icon">📚</span>
+          <span>Knowledge</span>
+        </button>
+        <button class="nav-tab" data-tab="status">
+          <span class="tab-icon">⚡</span>
+          <span>System</span>
+        </button>
+      </nav>
+      <div class="header-right">
+        <span id="session-label" class="session-pill"></span>
+        <button id="voice-toggle" class="voice-btn" type="button" title="Voice replies on" aria-pressed="true" aria-label="Toggle voice replies">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>
+            <path d="M16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button id="lock-button" class="lock-btn">Lock</button>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section id="tab-chat" class="tab-section active">
+        <div class="chat-container">
+          <div id="messages" class="messages-area">
+            <div class="welcome-screen">
+              <div class="welcome-orb"></div>
+              <h2>Hello sir, how can I help you?</h2>
+              <p>Speak with the mic or type below — memory, knowledge, and tools are ready.</p>
+              <div class="quick-actions">
+                <button class="quick-btn">What can you do?</button>
+                <button class="quick-btn">Remember my preferences</button>
+                <button class="quick-btn">Search my knowledge base</button>
+              </div>
+            </div>
+          </div>
+          <div class="chat-input-container">
+            <form id="chat-form" class="chat-form">
+              <textarea id="chat-input" placeholder="Type your message..." rows="1"></textarea>
+              <button type="button" id="mic-button" class="mic-btn" title="Talk to Prithivi" aria-label="Start voice input">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 15a3 3 0 003-3V6a3 3 0 10-6 0v6a3 3 0 003 3z" fill="currentColor"/>
+                  <path d="M19 11a7 7 0 01-14 0M12 18v4M8 22h8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <button type="submit" id="send-button" class="send-btn">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path d="M2.5 17.5L18.3333 10L2.5 2.5V8.33333L14.1667 10L2.5 11.6667V17.5Z" fill="currentColor"/>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-memory" class="tab-section">
+        <div class="grid-layout">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>🧠 Add Memory</h3>
+            </div>
+            <form id="memory-form" class="panel-form">
+              <textarea id="memory-text" placeholder="Enter a fact, preference, or observation..." rows="4" required></textarea>
+              <label class="checkbox-label">
+                <input id="memory-pinned" type="checkbox" checked>
+                <span class="checkbox-custom"></span>
+                <span>Pin to top</span>
+              </label>
+              <button type="submit" class="panel-btn">Save Memory</button>
+            </form>
+          </div>
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Memory Store</h3>
+              <label class="toggle">
+                <input id="memory-toggle" type="checkbox">
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Enabled</span>
+              </label>
+            </div>
+            <div id="memory-stats" class="stats-bar"></div>
+            <div id="memory-list" class="item-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-knowledge" class="tab-section">
+        <div class="grid-layout">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>📚 Ingest Document</h3>
+            </div>
+            <form id="ingest-form" class="panel-form">
+              <input id="ingest-path" type="text" placeholder="File path (e.g., /path/to/file.pdf)">
+              <div class="divider"><span>OR</span></div>
+              <textarea id="ingest-text" placeholder="Paste text content here..." rows="4"></textarea>
+              <input id="ingest-title" type="text" placeholder="Document title (optional)">
+              <button type="submit" class="panel-btn">Ingest & Index</button>
+              <p id="ingest-status" class="status-text"></p>
+            </form>
+          </div>
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Knowledge Base</h3>
+              <span id="knowledge-stats" class="badge"></span>
+            </div>
+            <div id="knowledge-list" class="item-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-status" class="tab-section">
+        <div class="status-grid" id="status-grid"></div>
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3>⚡ Available Tools</h3>
+          </div>
+          <div id="tool-list" class="tools-grid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="confirm" class="modal-overlay" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="confirm-title">Confirm Action</h3>
+      </div>
+      <p id="confirm-consequence" class="modal-text"></p>
+      <pre id="confirm-args" class="modal-code"></pre>
+      <div id="confirm-phrase-wrap" class="phrase-section" hidden>
+        <p>Type the phrase to confirm:</p>
+        <code id="confirm-phrase" class="phrase-code"></code>
+        <input id="confirm-phrase-input" type="text" placeholder="Enter phrase...">
+      </div>
+      <div class="modal-actions">
+        <button id="confirm-decline" class="modal-btn secondary">Decline</button>
+        <button id="confirm-approve" class="modal-btn primary">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/app.js"></script>
+  <script src="/bg.js"></script>
+</body>
+</html>

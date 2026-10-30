@@ -16,6 +16,7 @@ import datetime as dt
 import fnmatch
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 __all__ = [
     "DecisionReason",
@@ -36,7 +37,7 @@ class PermissionLevel(int):
     SENSITIVE = 3
     CRITICAL = 4
 
-    NAMES: dict[int, str] = {
+    NAMES: ClassVar[dict[int, str]] = {
         0: "information",
         1: "low-risk",
         2: "user-data",

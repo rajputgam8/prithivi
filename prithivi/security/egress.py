@@ -34,7 +34,7 @@ def is_private_host(host: str) -> bool:
     host = host.lower().strip("[]")
     if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
         return True
-    if host in {"::1", "0.0.0.0"} or host.startswith("fc") or host.startswith("fd"):
+    if host in {"::1", "0.0.0.0"} or host.startswith(("fc", "fd")):
         return True
     parts = host.split(".")
     if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
@@ -115,9 +115,11 @@ class EgressPolicy:
             return []
         if not self.allowed_hosts and not self.always_allowed:
             return [
-                "Egress allowlist is empty: any public host may be read. "
-                "Set PRITHIVI_EGRESS_ALLOWED_HOSTS to restrict page reading to "
-                "the hosts you trust."
+                (
+                    "Egress allowlist is empty: any public host may be read. "
+                    "Set PRITHIVI_EGRESS_ALLOWED_HOSTS to restrict page reading to "
+                    "the hosts you trust."
+                )
             ]
         return []
 

@@ -114,7 +114,7 @@ class Redactor:
             value_group = pattern.groups
             if value_group:
                 out = pattern.sub(
-                    lambda m: m.group(0).replace(m.group(value_group), "[REDACTED]"), out
+                    lambda m, group=value_group: m.group(0).replace(m.group(group), "[REDACTED]"), out
                 )
             else:
                 out = pattern.sub("[REDACTED]", out)

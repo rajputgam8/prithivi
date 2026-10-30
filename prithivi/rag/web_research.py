@@ -170,7 +170,7 @@ class ResearchResult:
         if self.citations.sources:
             parts.append("Sources: " + ", ".join(s.marker() for s in self.citations.sources[:4]) + ".")
         for extra in self.notes[:2]:
-            parts.append(extra)
+            parts.append(extra)  # noqa: PERF402 - the slice above is already a copy
         return " ".join(p for p in parts if p)
 
 

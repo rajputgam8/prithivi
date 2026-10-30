@@ -12,6 +12,7 @@ Commands:
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,8 @@ from ..core.state import AgentState, TurnSource
 from ..security.permissions import Effect, PermissionEngine, Policy
 
 __all__ = ["CLI", "Application"]
+
+log = logging.getLogger("prithivi.cli")
 
 BANNER = r"""
   ____      _     _  ___ _           _
@@ -67,6 +70,11 @@ class Application:
     audit: Any = None
     settings: Any = None
     researcher: Any = None
+    memory: Any = None
+    knowledge: Any = None
+    sessions: Any = None
+    db: Any = None
+    settings_repo: Any = None
     quit_requested: bool = False
 
     # -- confirmations -------------------------------------------------
@@ -282,6 +290,27 @@ class CLI:
             await self._cmd_doctor()
         elif name == "research":
             await self._cmd_research(rest)
+        elif name == "memory":
+            await self._cmd_memory(rest)
+        elif name == "remember":
+            if not rest:
+                self.console.print("[red]usage:[/] /remember <something to keep>")
+            else:
+                await self._turn_loop(f"remember {rest}")
+        elif name == "forget":
+            if not rest:
+                self.console.print("[red]usage:[/] /forget <key or phrase>")
+            else:
+                await self._turn_loop(f"forget {rest}")
+        elif name == "knowledge":
+            await self._cmd_knowledge(rest)
+        elif name == "ingest":
+            await self._cmd_ingest(rest)
+        elif name == "ask":
+            if not rest:
+                self.console.print("[red]usage:[/] /ask <question>")
+            else:
+                await self._turn_loop(rest)
         elif name == "grant":
             self._cmd_grant(rest)
         elif name == "revoke":
@@ -405,6 +434,125 @@ class CLI:
             f"[dim]{result.source_count} source(s), {result.duration_ms} ms, "
             f"provenance={result.provenance.value}[/]"
         )
+
+
+    # -- phase 7: memory and knowledge ---------------------------------
+    async def _cmd_memory(self, rest: str) -> None:
+        store = self.app.memory
+        if store is None:
+            self.console.print("[yellow]long-term memory is not available in this run[/]")
+            return
+        parts = rest.split()
+        action = parts[0].lower() if parts else "list"
+
+        if action in {"on", "off"}:
+            enabled = action == "on"
+            store.set_enabled(enabled)
+            if self.app.settings_repo is not None:
+                self.app.settings_repo.set("memory.enabled", enabled)
+            registry = self.app.agent.registry
+            from ..tools.memory_tools import build_memory_registry
+
+            if enabled:
+                for spec in build_memory_registry():
+                    if spec.name not in registry:
+                        registry.register(spec)
+            else:
+                for spec in build_memory_registry():
+                    registry.unregister(spec.name)
+            self.console.print(f"[green]memory {'enabled' if enabled else 'disabled'}[/]")
+            return
+
+        if action in {"forget-all", "clear"}:
+            removed = store.forget_all(include_pinned=False)
+            self.console.print(f"[green]forgot {removed} memory item(s)[/] (pinned profile kept)")
+            return
+
+        records = store.list_memories(limit=50)
+        if not records:
+            self.console.print("[dim]nothing remembered yet[/]")
+            return
+        table = Table(title=f"memory ({len(records)})")
+        table.add_column("key", style="cyan")
+        table.add_column("type")
+        table.add_column("text")
+        table.add_column("pinned", style="dim")
+        for record in records:
+            table.add_row(record.key, record.type, record.text[:100], "yes" if record.pinned else "")
+        self.console.print(table)
+
+    async def _cmd_knowledge(self, rest: str) -> None:
+        kb = self.app.knowledge
+        if kb is None:
+            self.console.print("[yellow]the knowledge base is not available in this run[/]")
+            return
+        parts = rest.split()
+        if parts and parts[0].lower() in {"delete", "remove", "rm"}:
+            if len(parts) < 2:
+                self.console.print("[red]usage:[/] /knowledge delete <document-id>")
+                return
+            deleted = kb.delete(parts[1])
+            self.console.print("[green]deleted[/]" if deleted else "[yellow]not found[/]")
+            return
+
+        documents = kb.documents(limit=100)
+        stats = kb.stats()
+        if not documents:
+            self.console.print("[dim]no documents saved yet; use /ingest <path>[/]")
+            return
+        table = Table(title=f"knowledge base ({stats.get('documents', len(documents))} documents)")
+        table.add_column("id", style="dim")
+        table.add_column("title", style="cyan")
+        table.add_column("chunks")
+        table.add_column("status")
+        table.add_column("uri", style="dim")
+        repo = kb.ingestor.repo
+        for document in documents:
+            table.add_row(
+                document.id[:10],
+                document.title or "(untitled)",
+                str(len(repo.list_chunks(document.id))),
+                document.status,
+                document.uri[:70],
+            )
+        self.console.print(table)
+
+    async def _cmd_ingest(self, rest: str) -> None:
+        kb = self.app.knowledge
+        if kb is None:
+            self.console.print("[yellow]the knowledge base is not available in this run[/]")
+            return
+        if not rest:
+            self.console.print("[red]usage:[/] /ingest <path to .txt/.md/.html/.pdf>")
+            return
+        self.console.print(f"[dim]indexing {rest}…[/]")
+        from ..rag.ingestion import IngestionError
+
+        try:
+            document = await asyncio.to_thread(kb.add_file, rest)
+        except IngestionError as exc:
+            self.console.print(f"[red]{exc.code}:[/] {exc}")
+            return
+        except Exception as exc:  # noqa: BLE001 - bad input is a message, not a crash
+            self.console.print(f"[red]ingestion failed:[/] {exc}")
+            return
+        label = "already indexed" if document.duplicate else "indexed"
+        self.console.print(
+            f"[green]{label}[/] {document.title or document.uri} "
+            f"({document.chunk_count} chunk(s), id {document.document_id[:10]})"
+        )
+        if self.app.audit is not None:
+            try:
+                self.app.audit.append(
+                    action="knowledge.ingest",
+                    outcome="success",
+                    actor="user",
+                    channel="cli",
+                    target=document.document_id,
+                    detail={"uri": document.uri, "chunks": document.chunk_count},
+                )
+            except Exception:
+                log.exception("could not append knowledge.ingest audit record")
 
     def _cmd_grant(self, rest: str) -> None:
         if not rest:

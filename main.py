@@ -33,11 +33,17 @@ from prithivi.core.events import EventBus
 from prithivi.core.narrator import Narrator
 from prithivi.core.router import Router
 from prithivi.core.state import TurnSource
+from prithivi.db.connection import Database
+from prithivi.db.repositories.sessions import SessionRepository
+from prithivi.db.repositories.settings import SettingsRepository
 from prithivi.interface.cli import CLI, Application
 from prithivi.llm.openai_compat import build_provider_from_settings
 from prithivi.llm.scripted import ScriptedProvider
+from prithivi.memory.long_term import MemoryStore
 from prithivi.observability.logging import configure_logging, get_logger
 from prithivi.platform.detect import describe_environment, in_proot
+from prithivi.rag.embeddings import HashEmbedder
+from prithivi.rag.knowledge_base import KnowledgeBase
 from prithivi.security.audit import AuditLog
 from prithivi.security.confirmation import (
     ConfirmationBroker,
@@ -69,6 +75,11 @@ class Runtime:
     router: Router
     console: Console
     _researcher: Any = None
+    db: Database | None = None
+    memory: MemoryStore | None = None
+    knowledge: KnowledgeBase | None = None
+    sessions: Any = None
+    settings_repo: SettingsRepository | None = None
 
     @classmethod
     def build(
@@ -84,10 +95,41 @@ class Runtime:
         settings.ensure_dirs()
 
         audit = audit if audit is not None else AuditLog(settings.audit_db_path)
+        db = None
+        memory = None
+        knowledge = None
+        sessions = None
+        settings_repo = None
+        try:
+            db = Database(settings.db_path)
+            db.migrate()
+            sessions = SessionRepository(db)
+            settings_repo = SettingsRepository(db)
+            memory_enabled = bool(getattr(settings, "memory_enabled", True))
+            stored = settings_repo.get("memory.enabled")
+            if isinstance(stored, bool):
+                memory_enabled = stored
+            memory = MemoryStore(db, embedder=HashEmbedder(), enabled=memory_enabled)
+            knowledge = KnowledgeBase(
+                db,
+                embedder=HashEmbedder(),
+                chunk_size=int(getattr(settings, "chunk_size", 512)),
+                chunk_overlap=int(getattr(settings, "chunk_overlap", 64)),
+                top_k=int(getattr(settings, "retrieval_top_k", 8)),
+            )
+        except Exception:  # Phase 7 services must never block startup
+            log.exception("could not initialise Phase 7 memory/knowledge services")
+
         registry = ToolRegistry(audit=audit)
         # The web tools are not registered at all when egress is off: offering
         # the model a tool that is guaranteed to refuse is worse than not having it.
-        registry.register_all(build_tool_specs(include_web=settings.egress_allow_network))
+        registry.register_all(
+            build_tool_specs(
+                include_web=settings.egress_allow_network,
+                include_memory=memory is not None and bool(getattr(memory, "enabled", False)),
+                include_knowledge=knowledge is not None,
+            )
+        )
 
         permissions = PermissionEngine(default_level=settings.permission_default_level)
         # Reading the clock and pure arithmetic cannot damage anything; asking
@@ -112,6 +154,9 @@ class Runtime:
             bus=bus,
             narrator=Narrator(),
             router=router,
+            memory=memory,
+            knowledge=knowledge,
+            sessions=sessions,
         )
         return cls(
             settings=settings,
@@ -124,6 +169,11 @@ class Runtime:
             agent=agent,
             router=router,
             console=console,
+            db=db,
+            memory=memory,
+            knowledge=knowledge,
+            sessions=sessions,
+            settings_repo=settings_repo,
         )
 
     def application(self) -> Application:
@@ -136,6 +186,11 @@ class Runtime:
             audit=self.audit,
             settings=self.settings,
             researcher=self.researcher,
+            memory=self.memory,
+            knowledge=self.knowledge,
+            sessions=self.sessions,
+            db=self.db,
+            settings_repo=self.settings_repo,
         )
 
     @property
@@ -160,6 +215,8 @@ class Runtime:
             session_id=self.agent.session.session_id,
             source=source.value,
             scratch=self.agent.scratch,
+            memory=self.memory,
+            knowledge=self.knowledge,
         )
 
 
@@ -202,7 +259,7 @@ def stdin_confirm(console: Console) -> ConfirmHandler:
     return handler
 
 
-COMMANDS = ("doctor", "verify", "tools", "voice")
+COMMANDS = ("doctor", "verify", "tools", "voice", "web")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -351,6 +408,21 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     if command == "voice":
         return await run_voice(settings, console, demo=args.demo)
+
+    if command == "web":
+        from prithivi.api.server import serve
+
+        if args.demo:
+            runtime = Runtime.build(
+                Settings.for_testing(log_level=settings.log_level),
+                console=console,
+                confirm_handler=stdin_confirm(console),
+                provider=make_demo_provider(),
+                audit=AuditLog(":memory:"),
+            )
+        else:
+            runtime = Runtime.build(settings, console=console, confirm_handler=stdin_confirm(console))
+        return await serve(settings, runtime)
 
     if args.demo:
         # In-memory audit: a demo must not pollute the real tamper-evident log.
